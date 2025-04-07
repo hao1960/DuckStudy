@@ -139,6 +139,9 @@ def register():
     
     if not username or not password:
         return jsonify({'success': False, 'message': '用户名和密码不能为空'})
+    # 密码强度验证：检查密码长度
+    if len(password) < 8:
+        return jsonify({'success': False, 'message': '密码长度不能少于8个字符'})
     
     if username in USERS:
         return jsonify({'success': False, 'message': '用户名已存在'})
@@ -173,4 +176,4 @@ def get_hot_projects():
     return jsonify(MOCK_HOT_PROJECTS)
 
 if __name__ == '__main__':
-    app.run(debug=True) 
+    app.run(debug=True)

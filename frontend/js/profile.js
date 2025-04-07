@@ -88,8 +88,8 @@ async function updateUserStatus() {
 // 加载用户详细信息
 async function loadUserProfile(username) {
     try {
-        // 这里应该调用后端API获取用户详细信息
-        // 目前使用模拟数据
+        // 调用后端API获取用户详细信息
+        const profileData = await userAPI.getProfile(username);
         const mockProfile = {
             nickname: username,
             bio: '这个人很懒，什么都没写...',
@@ -142,9 +142,15 @@ function addFormEvents() {
                     email: document.getElementById('email').value
                 };
                 
-                // 这里应该调用后端API保存用户信息
-                console.log('保存基本信息:', formData);
-                alert('保存成功！');
+                // 调用后端API保存用户信息
+                const result = await userAPI.updateProfile(formData);
+                if (result.success) {
+                    alert('保存成功！');
+                    // 更新显示的用户名
+                    document.getElementById('profileUsername').textContent = formData.nickname || formData.username;
+                } else {
+                    throw new Error(result.message || '保存失败');
+                }
             } catch (error) {
                 console.error('保存基本信息失败:', error);
                 alert('保存失败，请重试');
@@ -167,12 +173,25 @@ function addFormEvents() {
                     return;
                 }
                 
-                // 这里应该调用后端API修改密码
-                console.log('修改密码:', { currentPassword, newPassword });
-                alert('密码修改成功！');
+                // 密码强度验证
+                if (newPassword.length < 8) {
+                    alert('密码长度不能少于8位');
+                    return;
+                }
                 
-                // 清空表单
-                securityForm.reset();
+                // 调用后端API修改密码
+                const result = await userAPI.changePassword({
+                    currentPassword,
+                    newPassword
+                });
+                
+                if (result.success) {
+                    alert('密码修改成功！');
+                    // 清空表单
+                    securityForm.reset();
+                } else {
+                    throw new Error(result.message || '密码修改失败');
+                }
             } catch (error) {
                 console.error('修改密码失败:', error);
                 alert('修改失败，请重试');
@@ -201,4 +220,4 @@ function addFormEvents() {
             }
         });
     }
-} 
+}
