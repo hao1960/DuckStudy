@@ -1,7 +1,8 @@
+import os
+import sys
 from flask import Flask, jsonify, request, session, send_from_directory
 from flask_cors import CORS
 import json
-import os
 import time
 import hashlib  # 用于密码加密
 from services.github_service import github_service
@@ -14,12 +15,19 @@ load_dotenv()
 
 # 获取当前文件所在目录的父目录（项目根目录）
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# 添加项目根目录到Python路径
-import sys
 sys.path.append(BASE_DIR)
 
+# 导入数据库相关
+from config.database import db, init_db
+
+# 创建 Flask 应用
 app = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'frontend'))
+
+# 初始化数据库（必须在导入模型之前）
+init_db(app)
+
+# 导入模型（必须在 init_db 之后）
+from backend.models import User, Post, Comment, Course, CourseReview
 
 # 配置CORS
 CORS(app, 
