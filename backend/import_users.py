@@ -49,13 +49,13 @@ def import_users():
             columns = [row[0] for row in result]
             print("当前表结构:", columns)
             
-            # 清空现有用户数据
+                # 清空现有用户数据
             conn.execute(text('DELETE FROM users'))
             conn.commit()
-            print("已清空现有用户数据")
-            
-            # 导入新数据
-            for user_data in data['users']:
+                print("已清空现有用户数据")
+                
+                # 导入新数据
+                for user_data in data['users']:
                 # 准备用户数据
                 username = user_data['username']
                 password_hash = hash_password(user_data['password'])
@@ -79,10 +79,10 @@ def import_users():
                 # 执行插入
                 conn.execute(text(sql), params)
                 print(f"添加用户: {username}")
-            
-            # 提交所有更改
+                
+                # 提交所有更改
             conn.commit()
-            print("所有用户数据已成功导入")
+                print("所有用户数据已成功导入")
             
     except Exception as e:
         print(f"导入用户数据失败: {str(e)}")

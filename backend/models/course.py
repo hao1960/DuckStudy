@@ -23,7 +23,7 @@ class Course(db.Model):
     location = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # 关联关系
     reviews = db.relationship('CourseReview', 
                             backref=db.backref('course', lazy=True), 

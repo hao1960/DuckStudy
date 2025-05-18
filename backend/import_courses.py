@@ -2,25 +2,12 @@ import os
 import sys
 import json
 from datetime import datetime
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
-from urllib.parse import quote_plus
+from sqlalchemy import text
+from db_config import get_engine
 
 # 添加项目根目录到 Python 路径
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
-
-# 加载环境变量
-load_dotenv()
-
-def get_db_uri():
-    """获取数据库URI"""
-    DB_HOST = os.getenv('DB_HOST', 'localhost')
-    DB_PORT = os.getenv('DB_PORT', '3306')
-    DB_USER = os.getenv('DB_USER', 'root')
-    DB_PASSWORD = quote_plus(os.getenv('DB_PASSWORD', '350918'))
-    DB_NAME = os.getenv('DB_NAME', 'duckstudy')
-    return f'mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
 
 def import_courses():
     """导入课程数据"""
@@ -34,7 +21,7 @@ def import_courses():
         print(f"找到 {len(courses_data)} 条课程记录")
         
         # 创建数据库引擎
-        engine = create_engine(get_db_uri())
+        engine = get_engine()
         
         # 执行数据库操作
         with engine.connect() as conn:
@@ -59,9 +46,9 @@ def import_courses():
                 )
                 '''
                 params = {
-                    'title': course_data['name'],  # 使用 name 字段作为 title
+                    'title': course_data['name'],
                     'description': course_data['description'],
-                    'cover_image': f"https://example.com/{course_data['name']}.jpg",  # 生成示例图片URL
+                    'cover_image': f"https://example.com/{course_data['name']}.jpg",
                     'price': 0.0,
                     'average_rating': 0.0,
                     'teacher': course_data['teacher'],
