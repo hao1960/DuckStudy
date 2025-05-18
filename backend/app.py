@@ -4,7 +4,7 @@ from flask import Flask, jsonify, request, session, send_from_directory, render_
 from flask_cors import CORS
 import json
 import time
-import hashlib  # 用于密码加密
+import hashlib
 from services.github_service import github_service
 from dotenv import load_dotenv
 import requests
@@ -18,20 +18,11 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
-# 导入数据库相关
-from config.database import db, init_db
-
 # 创建 Flask 应用
 app = Flask(__name__, 
     template_folder=os.path.join(BASE_DIR, 'templates'),
     static_folder=os.path.join(BASE_DIR, 'static')
 )
-
-# 初始化数据库（必须在导入模型之前）
-init_db(app)
-
-# 导入模型（必须在 init_db 之后）
-from backend.models import User, Post, Comment, Course, CourseReview
 
 # 配置CORS
 CORS(app, 
@@ -50,10 +41,15 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-secret-key')
 # 内存数据存储
 MEMORY_DATA = {
     'courses': [],
-    'reviews': []
+    'reviews': [],
+    'users': [],
+    'posts': [],
+    'comments': {}
 }
 
 # 数据文件路径
+COURSES_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'courses.json')
+REVIEWS_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'course_reviews.json')
 POSTS_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'posts.json')
 COMMENTS_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'comments.json')
 USERS_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'users.json')
@@ -74,13 +70,69 @@ def ensure_file_exists(file_path, default_data=None):
     if not os.path.exists(file_path):
         with open(file_path, 'w', encoding='utf-8') as f:
             if default_data is None:
-                default_data = []
+                default_data = {"data": []} if isinstance(default_data, list) else {}
             json.dump(default_data, f, ensure_ascii=False, indent=4)
 
 # 初始化数据文件
-ensure_file_exists(POSTS_FILE, [])
-ensure_file_exists(COMMENTS_FILE, {})
-ensure_file_exists(USERS_FILE, [])
+ensure_file_exists(COURSES_FILE, {"courses": []})
+ensure_file_exists(REVIEWS_FILE, {"reviews": []})
+ensure_file_exists(POSTS_FILE, {"posts": []})
+ensure_file_exists(COMMENTS_FILE, {"comments": {}})
+ensure_file_exists(USERS_FILE, {"users": []})
+
+def load_json_data():
+    """从 JSON 文件加载数据到内存"""
+    try:
+        # 加载课程数据
+        with open(COURSES_FILE, 'r', encoding='utf-8') as f:
+            courses_data = json.load(f)['courses']
+            # 添加 id 字段
+            for i, course in enumerate(courses_data, 1):
+                course['id'] = i
+                course['average_rating'] = 0.0
+                course['price'] = 0.0
+                course['cover_image'] = f"https://example.com/{course['name']}.jpg"
+            MEMORY_DATA['courses'] = courses_data
+
+        # 加载评价数据
+        with open(REVIEWS_FILE, 'r', encoding='utf-8') as f:
+            reviews_data = json.load(f)['reviews']
+            # 添加 id 字段并关联课程
+            for i, review in enumerate(reviews_data, 1):
+                review['id'] = i
+                # 查找对应的课程
+                course = next((c for c in MEMORY_DATA['courses'] if c['name'] == review['course_name']), None)
+                if course:
+                    review['course_id'] = course['id']
+                    # 更新课程平均评分
+                    course_reviews = [r for r in reviews_data if r['course_name'] == course['name']]
+                    if course_reviews:
+                        course['average_rating'] = sum(r['rating'] for r in course_reviews) / len(course_reviews)
+            MEMORY_DATA['reviews'] = reviews_data
+
+        # 加载用户数据
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
+            users_data = json.load(f)
+            MEMORY_DATA['users'] = users_data.get('users', [])
+
+        # 加载帖子数据
+        with open(POSTS_FILE, 'r', encoding='utf-8') as f:
+            posts_data = json.load(f)
+            MEMORY_DATA['posts'] = posts_data.get('posts', [])
+
+        # 加载评论数据
+        with open(COMMENTS_FILE, 'r', encoding='utf-8') as f:
+            comments_data = json.load(f)
+            MEMORY_DATA['comments'] = comments_data.get('comments', {})
+
+        print("成功从 JSON 文件加载数据到内存")
+        return True
+    except Exception as e:
+        print(f"加载 JSON 数据失败: {str(e)}")
+        return False
+
+# 尝试加载数据
+load_json_data()
 
 # 读取帖子数据
 def read_posts():
@@ -767,47 +819,6 @@ def serve_static(path):
         # 对于图片请求，从frontend目录提供
         return send_from_directory(os.path.join(BASE_DIR, 'frontend'), path)
     return send_from_directory(os.path.join(BASE_DIR, 'frontend'), path)
-
-def load_json_data():
-    """从 JSON 文件加载数据到内存"""
-    try:
-        # 加载课程数据
-        courses_file = os.path.join(BASE_DIR, 'frontend', 'data', 'courses.json')
-        with open(courses_file, 'r', encoding='utf-8') as f:
-            courses_data = json.load(f)['courses']
-            # 添加 id 字段
-            for i, course in enumerate(courses_data, 1):
-                course['id'] = i
-                course['average_rating'] = 0.0
-                course['price'] = 0.0
-                course['cover_image'] = f"https://example.com/{course['name']}.jpg"
-            MEMORY_DATA['courses'] = courses_data
-
-        # 加载评价数据
-        reviews_file = os.path.join(BASE_DIR, 'frontend', 'data', 'course_reviews.json')
-        with open(reviews_file, 'r', encoding='utf-8') as f:
-            reviews_data = json.load(f)['reviews']
-            # 添加 id 字段并关联课程
-            for i, review in enumerate(reviews_data, 1):
-                review['id'] = i
-                # 查找对应的课程
-                course = next((c for c in MEMORY_DATA['courses'] if c['name'] == review['course_name']), None)
-                if course:
-                    review['course_id'] = course['id']
-                    # 更新课程平均评分
-                    course_reviews = [r for r in reviews_data if r['course_name'] == course['name']]
-                    if course_reviews:
-                        course['average_rating'] = sum(r['rating'] for r in course_reviews) / len(course_reviews)
-            MEMORY_DATA['reviews'] = reviews_data
-
-        print("成功从 JSON 文件加载数据到内存")
-        return True
-    except Exception as e:
-        print(f"加载 JSON 数据失败: {str(e)}")
-        return False
-
-# 尝试加载数据
-load_json_data()
 
 @app.route('/api/courses')
 def get_courses():
