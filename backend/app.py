@@ -18,6 +18,22 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
+# 检查是否使用数据库
+USE_DATABASE = os.getenv('USE_DATABASE', 'false').lower() == 'true'
+
+# 如果使用数据库，导入相关模块
+if USE_DATABASE:
+    try:
+        from config.database import db, init_db
+        from models import User, Post, Comment, Course, CourseReview
+        print("数据库模式已启用")
+    except ImportError as e:
+        print(f"警告: 数据库模块导入失败: {str(e)}")
+        print("将使用无数据库模式运行")
+        USE_DATABASE = False
+else:
+    print("无数据库模式已启用")
+
 # 创建 Flask 应用
 app = Flask(__name__, 
     template_folder=os.path.join(BASE_DIR, 'templates'),
@@ -38,7 +54,23 @@ CORS(app,
 # 设置密钥
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-secret-key')
 
-# 内存数据存储
+# 初始化 GitHub 服务（仅在数据库模式下）
+github_service_instance = None
+if USE_DATABASE:
+    try:
+        github_service_instance = github_service()
+        print("GitHub 服务初始化成功")
+    except Exception as e:
+        print(f"GitHub 服务初始化失败: {str(e)}")
+        print("GitHub 相关功能将不可用")
+else:
+    print("无数据库模式下跳过 GitHub 服务初始化")
+
+# 如果使用数据库，初始化数据库
+if USE_DATABASE:
+    init_db(app)
+
+# 内存数据存储（用于无数据库模式）
 MEMORY_DATA = {
     'courses': [],
     'reviews': [],
@@ -47,7 +79,7 @@ MEMORY_DATA = {
     'comments': {}
 }
 
-# 数据文件路径
+# 数据文件路径（用于无数据库模式）
 COURSES_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'courses.json')
 REVIEWS_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'course_reviews.json')
 POSTS_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'posts.json')
@@ -61,9 +93,12 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # 确保上传目录存在
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# 确保数据文件存在
+# 确保数据文件存在（仅用于无数据库模式）
 def ensure_file_exists(file_path, default_data=None):
     """确保文件存在，如果不存在则创建"""
+    if USE_DATABASE:
+        return
+        
     if not os.path.exists(os.path.dirname(file_path)):
         os.makedirs(os.path.dirname(file_path))
     
@@ -73,15 +108,19 @@ def ensure_file_exists(file_path, default_data=None):
                 default_data = {"data": []} if isinstance(default_data, list) else {}
             json.dump(default_data, f, ensure_ascii=False, indent=4)
 
-# 初始化数据文件
-ensure_file_exists(COURSES_FILE, {"courses": []})
-ensure_file_exists(REVIEWS_FILE, {"reviews": []})
-ensure_file_exists(POSTS_FILE, {"posts": []})
-ensure_file_exists(COMMENTS_FILE, {"comments": {}})
-ensure_file_exists(USERS_FILE, {"users": []})
+# 初始化数据文件（仅用于无数据库模式）
+if not USE_DATABASE:
+    ensure_file_exists(COURSES_FILE, {"courses": []})
+    ensure_file_exists(REVIEWS_FILE, {"reviews": []})
+    ensure_file_exists(POSTS_FILE, {"posts": []})
+    ensure_file_exists(COMMENTS_FILE, {"comments": {}})
+    ensure_file_exists(USERS_FILE, {"users": []})
 
 def load_json_data():
-    """从 JSON 文件加载数据到内存"""
+    """从 JSON 文件加载数据到内存（仅用于无数据库模式）"""
+    if USE_DATABASE:
+        return True
+        
     try:
         # 加载课程数据
         with open(COURSES_FILE, 'r', encoding='utf-8') as f:
@@ -131,8 +170,9 @@ def load_json_data():
         print(f"加载 JSON 数据失败: {str(e)}")
         return False
 
-# 尝试加载数据
-load_json_data()
+# 尝试加载数据（仅用于无数据库模式）
+if not USE_DATABASE:
+    load_json_data()
 
 # 读取帖子数据
 def read_posts():
@@ -337,28 +377,47 @@ def login():
     if not username or not password:
         return jsonify({'success': False, 'message': '用户名和密码不能为空'})
     
-    # 从JSON文件获取用户数据
-    users_data = read_users()
-    user = next((u for u in users_data['users'] if u['username'] == username), None)
-    
-    # 调试信息
-    print(f"尝试登录的用户: {username}")
-    print(f"用户数据: {user}")
-    print(f"输入的密码: {password}")
-    print(f"加密后的密码: {hash_password(password)}")
-    print(f"存储的密码: {user['password'] if user else 'None'}")
-    
-    if user and user['password'] == password:  # 暂时不使用密码加密
-        session['username'] = username
-        return jsonify({
-            'success': True, 
-            'message': '登录成功',
-            'user': {
-                'username': user['username'],
-                'avatar': user.get('avatar', ''),
-                'role': user.get('role', 'user')
-            }
-        })
+    if USE_DATABASE:
+        # 数据库模式
+        try:
+            user = User.query.filter_by(username=username).first()
+            if user and user.check_password(password):
+                session['username'] = username
+                return jsonify({
+                    'success': True, 
+                    'message': '登录成功',
+                    'user': {
+                        'username': user.username,
+                        'avatar': user.avatar or '',
+                        'role': user.role
+                    }
+                })
+        except Exception as e:
+            print(f"数据库登录失败: {str(e)}")
+            return jsonify({'success': False, 'message': '登录失败，请稍后重试'})
+    else:
+        # 无数据库模式
+        users_data = read_users()
+        user = next((u for u in users_data['users'] if u['username'] == username), None)
+        
+        # 调试信息
+        print(f"尝试登录的用户: {username}")
+        print(f"用户数据: {user}")
+        print(f"输入的密码: {password}")
+        print(f"加密后的密码: {hash_password(password)}")
+        print(f"存储的密码: {user['password'] if user else 'None'}")
+        
+        if user and user['password'] == password:  # 暂时不使用密码加密
+            session['username'] = username
+            return jsonify({
+                'success': True, 
+                'message': '登录成功',
+                'user': {
+                    'username': user['username'],
+                    'avatar': user.get('avatar', ''),
+                    'role': user.get('role', 'user')
+                }
+            })
     
     return jsonify({'success': False, 'message': '用户名或密码错误'})
 
@@ -580,7 +639,7 @@ def add_comment(post_id):
 def get_user_repos(username):
     """获取用户的GitHub仓库列表"""
     try:
-        repos = github_service.get_user_repos(username)
+        repos = github_service_instance.get_user_repos(username)
         return jsonify({
             'success': True,
             'data': repos
@@ -593,41 +652,73 @@ def get_user_repos(username):
 
 @app.route('/api/github/trending', methods=['GET'])
 def get_trending_repos():
-    """获取GitHub热门仓库"""
-    try:
-        time_range = request.args.get('timeRange', 'all')
-        language = request.args.get('language', None)
-        page = int(request.args.get('page', 1))
-        
-        # 将前端传来的timeRange转换为API的格式
-        time_map = {
-            'all': 'all',
-            'yearly': 'yearly',
-            'monthly': 'monthly',
-            'weekly': 'weekly',
-            'daily': 'daily'
-        }
-        
-        api_time_range = time_map.get(time_range, 'all')
-        
-        repos = github_service.get_trending_repos(language, api_time_range, 10)
+    """获取 GitHub 热门仓库"""
+    if not USE_DATABASE or not github_service_instance:
+        # 在无数据库模式下返回模拟数据
         return jsonify({
             'success': True,
-            'data': repos
+            'repos': [
+                {
+                    'name': '示例仓库1',
+                    'description': '这是一个示例仓库',
+                    'stars': 1000,
+                    'forks': 100,
+                    'language': 'Python',
+                    'url': 'https://github.com/example/repo1'
+                },
+                {
+                    'name': '示例仓库2',
+                    'description': '这是另一个示例仓库',
+                    'stars': 800,
+                    'forks': 80,
+                    'language': 'JavaScript',
+                    'url': 'https://github.com/example/repo2'
+                }
+            ]
         })
+    
+    try:
+        repos = github_service_instance.get_trending_repos()
+        return jsonify({'success': True, 'repos': repos})
     except Exception as e:
+        print(f"获取热门仓库失败: {str(e)}")
+        return jsonify({'success': False, 'message': '获取热门仓库失败'})
+
+@app.route('/api/github/search', methods=['GET'])
+def search_repos():
+    """搜索 GitHub 仓库"""
+    if not USE_DATABASE or not github_service_instance:
+        # 在无数据库模式下返回模拟数据
+        query = request.args.get('q', '')
         return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+            'success': True,
+            'repos': [
+                {
+                    'name': f'搜索结果: {query}',
+                    'description': f'这是关于 {query} 的示例搜索结果',
+                    'stars': 500,
+                    'forks': 50,
+                    'language': 'Python',
+                    'url': f'https://github.com/example/{query}'
+                }
+            ]
+        })
+    
+    try:
+        query = request.args.get('q', '')
+        repos = github_service_instance.search_repos(query)
+        return jsonify({'success': True, 'repos': repos})
+    except Exception as e:
+        print(f"搜索仓库失败: {str(e)}")
+        return jsonify({'success': False, 'message': '搜索仓库失败'})
 
 @app.route('/api/github/repo/<owner>/<repo>', methods=['GET'])
 def get_repo_info(owner, repo):
     """获取仓库详细信息"""
     try:
-        repo_info = github_service.get_repo_info(owner, repo)
-        languages = github_service.get_repo_languages(owner, repo)
-        contributors = github_service.get_repo_contributors(owner, repo)
+        repo_info = github_service_instance.get_repo_info(owner, repo)
+        languages = github_service_instance.get_repo_languages(owner, repo)
+        contributors = github_service_instance.get_repo_contributors(owner, repo)
         
         return jsonify({
             'success': True,
@@ -647,7 +738,7 @@ def get_repo_info(owner, repo):
 def check_rate_limit():
     """检查GitHub API速率限制"""
     try:
-        rate_limit = github_service.check_rate_limit()
+        rate_limit = github_service_instance.check_rate_limit()
         return jsonify({
             'success': True,
             'data': rate_limit
@@ -666,10 +757,10 @@ def get_common_projects():
         project_type = request.args.get('type', 'all')
         
         # 使用GitHub服务获取常用项目
-        if github_service:
+        if github_service_instance:
             try:
                 # 调用GitHub服务
-                projects = github_service.get_common_projects(tech, project_type)
+                projects = github_service_instance.get_common_projects(tech, project_type)
                 return jsonify({
                     'success': True,
                     'data': projects
@@ -924,4 +1015,10 @@ def add_review(course_id):
         })
 
 if __name__ == '__main__':
+    if USE_DATABASE:
+        print("使用数据库模式运行")
+    else:
+        print("使用无数据库模式运行")
+        if not load_json_data():
+            print("警告: 数据加载失败，将使用空数据启动")
     app.run(debug=True, port=5000) 

@@ -219,6 +219,12 @@
             "coverImages": [
                 "/images/posts/example.jpg"
             ]
+        },
+        {
+            "title": "测试帖子",
+            "content": "这是一个测试帖子的内容",
+            "author": "testuser",
+            "id": 1747548140156
         }
     ]
 }
