@@ -1,6 +1,6 @@
 import os
 import sys
-from flask import Flask, jsonify, request, session, send_from_directory
+from flask import Flask, jsonify, request, session, send_from_directory, render_template
 from flask_cors import CORS
 import json
 import time
@@ -9,6 +9,7 @@ from services.github_service import github_service
 from dotenv import load_dotenv
 import requests
 from werkzeug.utils import secure_filename
+from datetime import datetime
 
 # 加载环境变量
 load_dotenv()
@@ -21,7 +22,10 @@ sys.path.append(BASE_DIR)
 from config.database import db, init_db
 
 # 创建 Flask 应用
-app = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'frontend'))
+app = Flask(__name__, 
+    template_folder=os.path.join(BASE_DIR, 'templates'),
+    static_folder=os.path.join(BASE_DIR, 'static')
+)
 
 # 初始化数据库（必须在导入模型之前）
 init_db(app)
@@ -43,8 +47,11 @@ CORS(app,
 # 设置密钥
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-secret-key')
 
-# 用户数据存储（临时使用内存存储）
-USERS = {}
+# 内存数据存储
+MEMORY_DATA = {
+    'courses': [],
+    'reviews': []
+}
 
 # 数据文件路径
 POSTS_FILE = os.path.join(BASE_DIR, 'frontend', 'data', 'posts.json')
@@ -168,7 +175,8 @@ def hash_password(password):
 # 添加根路由
 @app.route('/')
 def index():
-    return send_from_directory(os.path.join(BASE_DIR, 'frontend'), 'index.html')
+    """首页"""
+    return render_template('index.html')
 
 # 模拟数据
 MOCK_REVIEWS = [
@@ -759,6 +767,150 @@ def serve_static(path):
         # 对于图片请求，从frontend目录提供
         return send_from_directory(os.path.join(BASE_DIR, 'frontend'), path)
     return send_from_directory(os.path.join(BASE_DIR, 'frontend'), path)
+
+def load_json_data():
+    """从 JSON 文件加载数据到内存"""
+    try:
+        # 加载课程数据
+        courses_file = os.path.join(BASE_DIR, 'frontend', 'data', 'courses.json')
+        with open(courses_file, 'r', encoding='utf-8') as f:
+            courses_data = json.load(f)['courses']
+            # 添加 id 字段
+            for i, course in enumerate(courses_data, 1):
+                course['id'] = i
+                course['average_rating'] = 0.0
+                course['price'] = 0.0
+                course['cover_image'] = f"https://example.com/{course['name']}.jpg"
+            MEMORY_DATA['courses'] = courses_data
+
+        # 加载评价数据
+        reviews_file = os.path.join(BASE_DIR, 'frontend', 'data', 'course_reviews.json')
+        with open(reviews_file, 'r', encoding='utf-8') as f:
+            reviews_data = json.load(f)['reviews']
+            # 添加 id 字段并关联课程
+            for i, review in enumerate(reviews_data, 1):
+                review['id'] = i
+                # 查找对应的课程
+                course = next((c for c in MEMORY_DATA['courses'] if c['name'] == review['course_name']), None)
+                if course:
+                    review['course_id'] = course['id']
+                    # 更新课程平均评分
+                    course_reviews = [r for r in reviews_data if r['course_name'] == course['name']]
+                    if course_reviews:
+                        course['average_rating'] = sum(r['rating'] for r in course_reviews) / len(course_reviews)
+            MEMORY_DATA['reviews'] = reviews_data
+
+        print("成功从 JSON 文件加载数据到内存")
+        return True
+    except Exception as e:
+        print(f"加载 JSON 数据失败: {str(e)}")
+        return False
+
+# 尝试加载数据
+load_json_data()
+
+@app.route('/api/courses')
+def get_courses():
+    """获取课程列表"""
+    try:
+        # 从内存数据获取课程列表
+        courses = MEMORY_DATA['courses']
+        return jsonify({
+            'code': 0,
+            'message': 'success',
+            'data': courses
+        })
+    except Exception as e:
+        return jsonify({
+            'code': 500,
+            'message': f'获取课程列表失败: {str(e)}',
+            'data': []
+        })
+
+@app.route('/api/courses/<int:course_id>')
+def get_course(course_id):
+    """获取课程详情"""
+    try:
+        # 从内存数据查找课程
+        course = next((c for c in MEMORY_DATA['courses'] if c['id'] == course_id), None)
+        if not course:
+            return jsonify({
+                'code': 404,
+                'message': '课程不存在',
+                'data': None
+            })
+        
+        # 获取课程评价
+        reviews = [r for r in MEMORY_DATA['reviews'] if r['course_id'] == course_id]
+        
+        return jsonify({
+            'code': 0,
+            'message': 'success',
+            'data': {
+                'course': course,
+                'reviews': reviews
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'code': 500,
+            'message': f'获取课程详情失败: {str(e)}',
+            'data': None
+        })
+
+@app.route('/api/courses/<int:course_id>/reviews', methods=['POST'])
+def add_review(course_id):
+    """添加课程评价"""
+    try:
+        # 从内存数据查找课程
+        course = next((c for c in MEMORY_DATA['courses'] if c['id'] == course_id), None)
+        if not course:
+            return jsonify({
+                'code': 404,
+                'message': '课程不存在',
+                'data': None
+            })
+        
+        # 获取请求数据
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'code': 400,
+                'message': '无效的请求数据',
+                'data': None
+            })
+        
+        # 创建新评价
+        new_review = {
+            'id': len(MEMORY_DATA['reviews']) + 1,
+            'course_id': course_id,
+            'course_name': course['name'],
+            'user_id': data.get('user_id', 1),
+            'username': data.get('username', '匿名用户'),
+            'rating': data.get('rating', 5),
+            'content': data.get('content', ''),
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # 添加到内存数据
+        MEMORY_DATA['reviews'].append(new_review)
+        
+        # 更新课程平均评分
+        course_reviews = [r for r in MEMORY_DATA['reviews'] if r['course_id'] == course_id]
+        if course_reviews:
+            course['average_rating'] = sum(r['rating'] for r in course_reviews) / len(course_reviews)
+        
+        return jsonify({
+            'code': 0,
+            'message': 'success',
+            'data': new_review
+        })
+    except Exception as e:
+        return jsonify({
+            'code': 500,
+            'message': f'添加评价失败: {str(e)}',
+            'data': None
+        })
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000) 
